@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Building and Evaluating a RAG-Based Chatbot</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/reveal.js/4.3.1/reset.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/reveal.js/4.3.1/reveal.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/reveal.js/4.3.1/theme/night.min.css" id="theme">
+    <style>
+        .reveal h1, .reveal h2, .reveal h3, .reveal h4 { text-transform: none; }
+        .reveal p, .reveal li { font-size: 0.85em; }
+        .reveal .speaker-notes { font-size: 0.8em; color: #aaa; }
+        .highlight { color: #e7ad52; }
+        .example-box { background-color: #222; border-left: 5px solid #e7ad52; padding: 12px; margin-top: 15px; font-size: 0.7em; text-align: left; line-height: 1.4;}
+        .wrong-box { background-color: #311; border-left: 5px solid #f92672; padding: 12px; margin-top: 15px; font-size: 0.7em; text-align: left; line-height: 1.4;}
+        .code-text { font-family: monospace; color: #a6e22e; font-size: 0.9em; display: block; margin-top: 5px; background: #111; padding: 8px; border-radius: 4px;}
+        .bad-code { font-family: monospace; color: #f92672; }
+        table { font-size: 0.65em; width: 100%; margin-top: 15px !important; }
+        th, td { padding: 8px !important; border-bottom: 1px solid #444; }
+    </style>
+</head>
+<body>
+    <div class="reveal">
+        <div class="slides">
+
+            <section style="height: 100%; position: relative;">
+                <div style="position: absolute; top: 0; right: 0; font-size: 0.5em; color: #888; font-weight: bold;">Spice Money - Data Science & AI</div>
+                
+                <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 100%;">
+                    <h2>Building and Evaluating a <span class="highlight">RAG-Based Chatbot</span></h2>
+                    <p>From Knowledge base to Custom Evals</p>
+                    <p style="font-size: 0.6em; color: #888;">Use Left/Right arrows for main concepts. Use Down arrows for implementation deep-dives.</p>
+                </div>
+
+                <div style="position: absolute; bottom: 0; right: 0; font-size: 0.5em; color: #888;">date: 24.Feb.2026</div>
+            </section>
+
+            <section>
+                <section>
+                    <h3>Leg 1: Data Standardization</h3>
+                    <p>RAG is fundamentally the construction of a semantic data pipeline. Poor data quality guarantees poor AI reasoning.</p>
+                    <ul>
+                        <li><b>Unified Format:</b> Convert diverse files to <b>Markdown</b> to natively preserve hierarchical structures like headers, bullet points, and tables.</li>
+                        <li><b>Noise Reduction:</b> Strip elements that provide no semantic value (page numbers, footers) as they dilute the vector meaning.</li>
+                    </ul>
+                </section>
+                <section>
+                    <h3>How to do Data Standardization</h3>
+                    <p>Establish an automated pipeline (ETL) to continuously sync updates from source systems.</p>
+                    <div class="example-box">
+                        <b>Demonstration: The Markdown Advantage</b><br>
+                        Raw PDF extractors often destroy table structure, reading it as: <span class="bad-code">"Name Age Role John 30 Dev"</span>. This destroys the spatial relationship of the data.<br><br>
+                        By transforming to Markdown, we preserve the semantic relationship: <br>
+                        <span class="code-text">| Name | Age | Role |<br>| John | 30 | Dev |</span>
+                        This ensures the LLM mathematically understands John is the Developer, rather than guessing based on word proximity.
+                    </div>
+                </section>
+                <section>
+                    <h3>The Wrong Way to Standardize</h3>
+                    <p>Feeding a system raw, conflicting, or obsolete data.</p>
+                    <div class="wrong-box">
+                        <b>Example Consequence: The Versioning Nightmare</b><br>
+                        If you fail to exclude obsolete data, you might index "V1 Policy: Remote work allowed" and "V2 Policy: Return to office". <br><br>
+                        The RAG system will retrieve both because they share high semantic overlap, and the LLM will confidently provide incorrect or conflicting answers to the user, eroding trust.
+                    </div>
+                </section>
+            </section>
+
+            <section>
+                <section>
+                    <h3>The Power of Hybrid Search</h3>
+                    
+                    <p>Metadata enrichment allows for "hybrid search," significantly improving accuracy and speed by pre-filtering the search space.</p>
+                </section>
+                <section>
+                    <h3>How to Implement Hybrid Search</h3>
+                    <p>Tag every document with structured metadata (Author, Department, Year) before ingestion.</p>
+                    <div class="example-box">
+                        <b>Demonstration: The Query Execution</b><br>
+                        User asks: <i>"What is the 2025 Marketing Budget?"</i><br><br>
+                        <b>Step 1 (Hard Filter):</b> The system executes a deterministic SQL-like query on metadata tags: <span class="code-text" style="display:inline;">WHERE Department = 'Marketing' AND Year = '2025'</span>.<br>
+                        <b>Step 2 (Semantic):</b> The system <i>only</i> performs vector similarity search on that tiny remaining subset, saving massive compute costs and preventing cross-department hallucinations.
+                    </div>
+                </section>
+                <section>
+                    <h3>What other searches exist?</h3>
+                    <div class="wrong-box">
+                        <b>Demonstration: Why Pure Searches Fail</b><br><br>
+                        <b>Pure Vector Search:</b> If a user asks for "2025 budget", a pure semantic search might accidentally retrieve the 2024 budget document because the words and concepts are almost identical mathematically.<br><br>
+                        <b>Pure Keyword (BM25) Search:</b> If a user asks about "working remotely", a keyword search will fail to retrieve a document that only uses the term "telecommuting" because it lacks semantic understanding.
+                    </div>
+                </section>
+            </section>
+
+            <section>
+                <section>
+                    <h3>Leg 2: Chunking Strategies</h3>
+                    <p>Embedding models and LLMs have strict limits on context windows; documents must be split into manageable chunks.</p>
+                    <ul>
+                        <li><b>Fixed-Size:</b> Strict character/token count with overlap.</li>
+                        <li><b>Recursive Character:</b> Splits iteratively by natural boundaries.</li>
+                        <li><b>Semantic / Document-Aware:</b> Keeps logical structures together.</li>
+                    </ul>
+                </section>
+                <section>
+                    <h3>How to do Semantic Chunking</h3>
+                    <p>The most effective method for complex enterprise documents.</p>
+                    <div class="example-box">
+                        <b>Demonstration: Document-Aware Splitting</b><br>
+                        Instead of cutting arbitrarily, split by inherent structure.<br>
+                        <span class="code-text">
+                        ### Section 4: PTO Rules<br>
+                        Employees get 20 days. Requires 2 weeks notice.
+                        </span>
+                        Semantic chunking keeps this entire Markdown header and its content together as a single, distinct chunk, ensuring it remains a complete, self-contained concept for the embedding model to interpret.
+                    </div>
+                </section>
+                <section>
+                    <h3>The Wrong Way to Chunk</h3>
+                    <p>Naive, fixed-size chunking without semantic awareness.</p>
+                    <div class="wrong-box">
+                        <b>Demonstration: The Fixed-Size Fracture</b><br>
+                        Fixed-size chunking splits strictly by token count (e.g., every 500 tokens).<br><br>
+                        <i>Original text:</i> "Employees receive 20 days of PTO. Approval requires 2 weeks notice."<br>
+                        <i>Chunk 1 cuts off:</i> <span class="bad-code">"Employees receive 20 days of PTO. Approv"</span><br>
+                        <i>Chunk 2 starts:</i> <span class="bad-code">"al requires 2 weeks notice."</span><br><br>
+                        This severs the semantic context. The LLM might retrieve Chunk 1 and miss the crucial approval requirement entirely, providing legally or operationally flawed advice.
+                    </div>
+                </section>
+            </section>
+
+            <section>
+                <section>
+                    <h3>Creating Embeddings (Vectorization)</h3>
+                    
+                    <p>The core "translation layer" bridging human language and machine logic.</p>
+                    <ul>
+                        <li>Converts text into dense vectors (e.g., <span class="code-text" style="display:inline;">[0.152, -0.841, 0.993...]</span>) based purely on <b>semantic meaning</b>.</li>
+                    </ul>
+                </section>
+                <section>
+                    <h3>How to utilize Embeddings in RAG</h3>
+                    <p>The embedding model plays a crucial dual role acting as a universal translator.</p>
+                    <div class="example-box">
+                        <b>Demonstration: The Dual-Translation Pipeline</b><br>
+                        <b>1. Ingestion:</b> A chunk containing "telecommuting" passes through the model and is assigned vector coordinates in the database.<br>
+                        <b>2. Retrieval:</b> A user asks about "working remotely".<br><br>
+                        Because the user's question passes through the <i>exact same embedding model</i>, it lands in the same semantic mathematical area, successfully retrieving the "telecommuting" chunk even though the specific keywords do not overlap.
+                    </div>
+                </section>
+                <section>
+                    <h3>Generating Embeddings: Models</h3>
+                    
+                    <p>Use a standard embedding model to mathematically encode the text.</p>
+                    <div class="example-box">
+                        <b>Top Open-Source Models:</b><br>
+                        - <b>nomic-embed-text:</b> A highly recommended standard embedding model for retrieval. It supports large context lengths (8192 tokens) allowing for larger semantic chunks.<br>
+                        - <b>BAAI/bge-large-en-v1.5:</b> A powerhouse open-source model consistently topping embedding leaderboards.<br>
+                        - <b>all-MiniLM-L6-v2:</b> Incredibly fast and lightweight, perfect for prototyping on machines with low VRAM.
+                    </div>
+                </section>
+                <section>
+                    <h3>Implementing Embeddings</h3>
+                    <p>Translating the text chunk into mathematical vector coordinates.</p>
+                    <div class="example-box">
+                        <b>How to Implement (Python Example):</b>
+                        <span class="code-text">
+                        from sentence_transformers import SentenceTransformer<br>
+                        <br>
+                        # Initialize the standard model<br>
+                        model = SentenceTransformer('nomic-ai/nomic-embed-text')<br>
+                        <br>
+                        # Convert document chunk into a dense vector<br>
+                        chunk_vector = model.encode(["Telecommuting requires written approval."])<br>
+                        <br>
+                        print(chunk_vector) <br>
+                        # Output: [-0.034, 0.129, 0.842, 0.111, -0.992...]
+                        </span>
+                    </div>
+                </section>
+            </section>
+
+            <section>
+                <section>
+                    <h3>Evaluating Open-Source LLMs</h3>
+                    <h4>The Isolation Principle</h4>
+                    <p>A RAG pipeline has a Retriever and a Generator. If an output is bad, you must know exactly which engine failed.</p>
+                    <ul>
+                        <li>Freeze the retrieval layer.</li>
+                        <li>Ensure every LLM is fed the exact same context to strictly isolate the generator's performance.</li>
+                    </ul>
+                </section>
+                <section>
+                    <h3>The Golden Dataset Principle</h3>
+                    <p>You cannot evaluate an LLM without a verified baseline of truth.</p>
+                    <div class="example-box">
+                        <b>Demonstration: Golden Record IT-042</b><br>
+                        <b>User Question:</b> "What is the process for replacing a laptop damaged by a spilled coffee, and how long does it take?"<br><br>
+                        <b>Ground Truth Context:</b> "...Accidental damage (e.g., liquid spills, drops) requires submitting Form IT-AD-01 and written manager approval. Processing... takes 5-7 business days."<br><br>
+                        <b>Expected 'Gold' Answer:</b> "To replace a laptop... you must submit Form IT-AD-01 and get written approval from your manager. The process takes 5-7 business days."
+                    </div>
+                </section>
+                <section>
+                    <h3>Step-by-Step: Assembling the Dataset</h3>
+                    <p>Never use generic datasets. Build custom queries based on your actual data.</p>
+                    <div class="example-box">
+                        <b>How to Actually Build It:</b><br>
+                        <b>1. Sample Source Data:</b> Randomly extract chunks representing real enterprise knowledge (PDFs, wikis, databases).<br><br>
+                        <b>2. Generate Questions:</b> Aim for 50-150 diverse questions based <i>only</i> on those chunks. Include easy questions, complex multi-hop questions, and edge cases.<br><br>
+                        <b>3. Map Ground Truth:</b> Strictly pair every generated question with its exact source chunk ID.<br><br>
+                        <b>4. Draft the Gold Answer:</b> Manually write the perfect expected answer, ensuring it relies 100% on the source chunk and contains zero outside knowledge.
+                    </div>
+                </section>
+            </section>
+
+            <section>
+                <section>
+                    <h3>"LLM-as-a-Judge" Evaluation</h3>
+                    <p>Manual grading is impossible at scale. We use a highly capable "Judge" model (e.g., GPT-4o, Llama-3-70B) to mathematically score the outputs.</p>
+                    <ul>
+                        <li><b>Faithfulness:</b> Checking for hallucinated claims not present in the context.</li>
+                        <li><b>Answer Relevancy:</b> Checking if the model actually answered the user's specific question.</li>
+                        <li><b>Context Adherence:</b> Checking if the model gets lost in the noise.</li>
+                    </ul>
+                </section>
+                <section>
+                    <h3>The Math Behind the Metrics</h3>
+                    
+                    <div class="example-box">
+                        <b>Calculating Faithfulness (Precision Metric):</b><br>
+                        The Judge LLM breaks the generated answer into individual claims. It checks if each claim can be inferred from the retrieved context.<br>
+                        <span class="code-text" style="display:inline;">Faithfulness Score = (Claims Present in Context) / (Total Claims in Generated Answer)</span><br><br>
+                        <b>Calculating Answer Relevancy:</b><br>
+                        Often calculated by generating artificial questions from the generated answer, then calculating the <b>Cosine Similarity</b> between the embeddings of the <i>artificial questions</i> and the <i>original user question</i>. Higher similarity means the answer directly addressed the prompt's core intent.
+                    </div>
+                </section>
+                <section>
+                    <h3>Context Adherence ("Lost in the Middle")</h3>
+                    
+                    <p>How well does the model utilize context when it is hidden among irrelevant chunks?</p>
+                    <div class="example-box">
+                        <b>How to test it (The Noise Injection Method):</b><br>
+                        To test this adherence, deliberately inject 3 irrelevant chunks of text into the prompt alongside the 1 correct chunk. <br><br>
+                        <i>Example:</i> If evaluating the laptop coffee spill policy, surround that single correct chunk with retrieved chunks about cafeteria menus and parking rules. See if the open-source model gets confused by the "noise" and hallucinates. Smaller open-source models (under 10B parameters) often fail this test compared to larger ones.
+                    </div>
+                </section>
+            </section>
+
+            <section>
+                <section>
+                    <h3>Needle In A Haystack (NIAH) Testing</h3>
+                    
+                    <p>Testing an LLM's recall ability when a specific fact is buried within a massive context window.</p>
+                    <ul>
+                        <li><b>The Principle:</b> Large Context LLMs claim to support 128k+ tokens, but often suffer from an "attention sink" where they forget facts placed in the middle of the prompt.</li>
+                        <li><b>The Application:</b> Crucial for RAG to ensure the LLM doesn't ignore the most relevant chunk just because it was concatenated in the middle of the retrieved context string.</li>
+                    </ul>
+                </section>
+                <section>
+                    <h3>How to perform NIAH Testing</h3>
+                    <p>Systematically vary the position of the target fact to map out the model's blind spots.</p>
+                    <div class="example-box">
+                        <b>The Process:</b><br>
+                        1. Generate a synthetic, highly specific fact (e.g., <span class="code-text" style="display:inline;">"The secret passcode to server room B is 'Pineapple-42'."</span>).<br>
+                        2. Create a "Haystack": A 50-page document of completely irrelevant text (e.g., company history).<br>
+                        3. Insert the fact at 0% depth (beginning), 50% depth (middle), and 100% depth (end).<br>
+                        4. Ask the LLM: <i>"What is the secret passcode to server room B?"</i>
+                    </div>
+                </section>
+                 <section>
+                    <h3>Configuring LLM-as-a-Judge for NIAH</h3>
+                    <p>Automate the verification of the retrieved needle.</p>
+                    <div class="example-box">
+                        <b>Demonstration: The Judge Prompt</b>
+                        <span class="code-text">
+                        You are an exact-match evaluation system.<br>
+                        Given the EXPECTED_FACT and the model's GENERATED_ANSWER, determine if the answer successfully contains the core information of the fact.<br><br>
+                        EXPECTED_FACT: "The secret passcode to server room B is Pineapple-42."<br>
+                        GENERATED_ANSWER: {model_output}<br><br>
+                        Respond ONLY with a 1 if the fact is present and correct, or a 0 if the fact is missing, hallucinated, or incorrect.
+                        </span>
+                    </div>
+                </section>
+            </section>
+
+            <section>
+                <section>
+                    <h3>The Final Decision Matrix</h3>
+                    <p>Evaluate speed, hardware costs, and VRAM limits alongside accuracy.</p>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Model</th>
+                                <th>Faithfulness</th>
+                                <th>Relevancy</th>
+                                <th>Tokens/Sec</th>
+                                <th>VRAM Required</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>Phi-3-Mini (3.8B)</td>
+                                <td>0.86</td>
+                                <td>0.84</td>
+                                <td>110 t/s</td>
+                                <td>~4 GB</td>
+                            </tr>
+                            <tr>
+                                <td>Llama-3.2-3B</td>
+                                <td>0.89</td>
+                                <td>0.88</td>
+                                <td>95 t/s</td>
+                                <td>~4 GB</td>
+                            </tr>
+                            <tr>
+                                <td>Llama-3-8B</td>
+                                <td>0.92</td>
+                                <td>0.88</td>
+                                <td>65 t/s</td>
+                                <td>~6 GB</td>
+                            </tr>
+                            <tr>
+                                <td>Mistral-7B</td>
+                                <td>0.85</td>
+                                <td>0.82</td>
+                                <td>70 t/s</td>
+                                <td>~6 GB</td>
+                            </tr>
+                            <tr>
+                                <td>Qwen-2.5-14B</td>
+                                <td>0.96</td>
+                                <td>0.94</td>
+                                <td>40 t/s</td>
+                                <td>~12 GB</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </section>
+                <section>
+                    <h3>How to Make the Final Decision</h3>
+                    <div class="example-box">
+                        <b>The Engineering Trade-offs:</b><br>
+                        - Highly constrained edge devices or laptops? <b>Phi-3-Mini</b> or <b>Llama-3.2-3B</b> deliver fast reasoning on less than 4GB of VRAM.<br>
+                        - Mid-tier server GPUs (e.g., RTX 3060/4060)? <b>Llama-3-8B</b> is the clear winner over Mistral for faithfulness.<br>
+                        - Accuracy is paramount and you can afford larger GPUs (e.g., A100s)? <b>Qwen-2.5-14B</b> offers the best reasoning efficacy.<br><br>
+                        <b>The Ultimate Rule:</b> A model that scores 0.98 but takes 45 seconds to answer is a failed product.
+                    </div>
+                </section>
+            </section>
+
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/reveal.js/4.3.1/reveal.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/reveal.js/4.3.1/plugin/notes/notes.min.js"></script>
+    <script>
+        Reveal.initialize({
+            hash: true,
+            plugins: [ RevealNotes ],
+            slideNumber: 'c/t',
+            width: 1080,
+            height: 700,
+            margin: 0.04,
+            minScale: 0.2,
+            maxScale: 2.0
+        });
+    </script>
+</body>
+</html>
